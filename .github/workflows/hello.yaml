@@ -50,6 +50,7 @@ jobs:
       run: |
         # Push the Docker image with the unique tag
         docker push ${{ secrets.DOCKER_USERNAME }}/projects:$UNIQUE_TAG
+        echo "IMAGE_TAG=$UNIQUE_TAG" >> $GITHUB_ENV
 
     - name: Configure SSH
       run: |

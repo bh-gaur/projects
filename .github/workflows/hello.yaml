@@ -44,7 +44,7 @@ jobs:
         echo "Generated tag: $UNIQUE_TAG"
         echo "UNIQUE_TAG=$UNIQUE_TAG" >> $GITHUB_ENV
 
-        cd project1
+        cd project1/
         # Build the Docker image with the unique tag
         docker build -t ${{ secrets.DOCKER_USERNAME }}/projects:$UNIQUE_TAG -f Dockerfile .
 
@@ -64,8 +64,9 @@ jobs:
     - name: SSH on server
       run: |
         ls
-        scp -i ~/.ssh/id_rsa cleanup_docker.sh ubuntu@${{ env.SERVER_IP }}:~/.
+        scp -i ~/.ssh/id_rsa project1/cleanup_docker.sh ubuntu@${{ env.SERVER_IP }}:~/.
         ssh -i ~/.ssh/id_rsa ubuntu@${{ env.SERVER_IP }} 'bash -s' << EOF
+            chmod +x ./cleanup_docker.sh
           # Run the cleanup script with the passed image name and tag
-            /home/ubuntu/cleanup_docker.sh ${{ env.IMAGE_NAME }}:$UNIQUE_TAG
+            ./cleanup_docker.sh ${{ env.IMAGE_NAME }}:$UNIQUE_TAG
         EOF

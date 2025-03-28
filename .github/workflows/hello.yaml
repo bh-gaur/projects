@@ -40,7 +40,7 @@ jobs:
       run: |
         # Generate a unique tag based on the commit SHA and timestamp
         TIMESTAMP=$(date +'%Y%m%d%H%M%S')
-        UNIQUE_TAG="${GITHUB_SHA:0:7}-${TIMESTAMP}"
+        UNIQUE_TAG="${GITHUB_SHA:0:7}_${TIMESTAMP}"
         echo "Generated tag: $UNIQUE_TAG"
         echo "UNIQUE_TAG=$UNIQUE_TAG" >> $GITHUB_ENV
 
@@ -63,7 +63,7 @@ jobs:
 
     - name: SSH on server
       run: |
-        ssh -o StrictHostKeyChecking=no user@your-server-ip 'bash -s' <<EOF
+        ssh -o StrictHostKeyChecking=no ubuntu@${{ env.SERVER_IP }} 'bash -s' <<EOF
           # Pass the unique tag to the script and run it
           ./cleanup_docker.sh ${{ env.IMAGE_NAME }}:$UNIQUE_TAG
         EOF

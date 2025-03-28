@@ -66,5 +66,5 @@ jobs:
         scp -i ~/.ssh/id_rsa cleanup_docker.sh ubuntu@${{ env.SERVER_IP }}:~/.
         ssh -i ~/.ssh/id_rsa ubuntu@${{ env.SERVER_IP }} 'bash -s' << EOF
           # Run the cleanup script with the passed image name and tag
-          ./cleanup_docker.sh ${{ env.IMAGE_NAME }}:$UNIQUE_TAG
+            /home/ubuntu/cleanup_docker.sh ${{ env.IMAGE_NAME }}:$UNIQUE_TAG
         EOF

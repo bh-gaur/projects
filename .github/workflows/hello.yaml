@@ -64,8 +64,8 @@ jobs:
     - name: SSH on server
       run: |
         ls
-        scp -i ~/.ssh/id_rsa project1/cleanup_docker.sh ubuntu@${{ env.SERVER_IP }}:~/.
-        ssh -i ~/.ssh/id_rsa ubuntu@${{ env.SERVER_IP }} 'bash -s' << EOF
+        scp -o StrictHostKeyChecking=no ./project1/cleanup_docker.sh ubuntu@${{ env.SERVER_IP }}:~/.
+        ssh -o StrictHostKeyChecking=no ubuntu@${{ env.SERVER_IP }} 'bash -s' << EOF
             chmod +x ./cleanup_docker.sh
           # Run the cleanup script with the passed image name and tag
             ./cleanup_docker.sh ${{ env.IMAGE_NAME }}:$UNIQUE_TAG

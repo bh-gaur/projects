@@ -64,7 +64,7 @@ jobs:
     - name: SSH on server
       run: |
         scp -i ~/.ssh/id_rsa cleanup_docker.sh ubuntu@${{ env.SERVER_IP }}:~/.
-        ssh -o StrictHostKeyChecking=no ubuntu@${{ env.SERVER_IP }} 'bash -s' <<EOF
-          # Pass the unique tag to the script and run it
+        ssh -i ~/.ssh/id_rsa ubuntu@${{ env.SERVER_IP }} << 'EOF'
+          # Run the cleanup script with the passed image name and tag
           ./cleanup_docker.sh ${{ env.IMAGE_NAME }}:$UNIQUE_TAG
         EOF

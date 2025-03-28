@@ -68,5 +68,5 @@ jobs:
         ssh -o StrictHostKeyChecking=no ubuntu@${{ env.SERVER_IP }} 'bash -s' << EOF
             chmod +x ./cleanup_docker.sh
           # Run the cleanup script with the passed image name and tag
-            ./cleanup_docker.sh ${{ env.IMAGE_NAME }}:$UNIQUE_TAG  >> output.txt
+            ./cleanup_docker.sh ${{ env.IMAGE_NAME }}:$UNIQUE_TAG  > output.txt
         EOF

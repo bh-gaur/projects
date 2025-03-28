@@ -40,7 +40,9 @@ jobs:
       run: |
         # Generate a unique tag based on the commit SHA and timestamp
         TIMESTAMP=$(date +'%Y%m%d%H%M%S')
-        UNIQUE_TAG="${{ github.sha }}-${TIMESTAMP}"
+        UNIQUE_TAG="${GITHUB_SHA:0:7}-${TIMESTAMP}"
+        echo "Generated tag: $UNIQUE_TAG"
+        echo "UNIQUE_TAG=$UNIQUE_TAG" >> $GITHUB_ENV
 
         cd project1
         # Build the Docker image with the unique tag

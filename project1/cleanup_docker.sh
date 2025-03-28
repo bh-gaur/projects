@@ -10,14 +10,14 @@ IMAGE_TAG=$1
 
 # Stop and remove all running containers
 echo "Stopping all running containers..."
-sudo docker stop $(docker ps -aq) || echo "No running containers to stop."
+sudo docker stop $(sudo docker ps -aq) || echo "No running containers to stop."
 
 echo "Removing all containers..."
-sudo docker rm $(docker ps -aq) || echo "No containers to remove."
+sudo docker rm $(sudo docker ps -aq) || echo "No containers to remove."
 
 # Remove all images
 echo "Removing all Docker images..."
-sudo docker rmi $(docker images -q) || echo "No images to remove."
+sudo docker rmi $(sudo docker images -q) || echo "No images to remove."
 
 # Check if the image is already pulled locally, if not, pull it
 echo "Checking if Docker image $IMAGE_TAG is already pulled..."

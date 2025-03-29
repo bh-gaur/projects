@@ -63,7 +63,7 @@ jobs:
     - name: SSH on server
       run: |
         ls
-        scp -o StrictHostKeyChecking=no ./project1/cleanup_docker.sh ubuntu@${{ vars.SERVER_IP }}:~/.
+        scp -o StrictHostKeyChecking=no ./project2/cleanup_docker.sh ubuntu@${{ vars.SERVER_IP }}:~/.
         ssh -o StrictHostKeyChecking=no ubuntu@${{ vars.SERVER_IP }} 'bash -s' << EOF
             chmod +x ./cleanup_docker.sh
           # Run the cleanup script with the passed image name and tag

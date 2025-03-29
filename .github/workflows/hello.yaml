@@ -13,7 +13,6 @@ on:
 
 env:
   IMAGE_NAME: "bgdevopslearn/projects"
-  SERVER_IP: "54.198.223.216"
 
 jobs:
   Creating_Image:
@@ -64,8 +63,8 @@ jobs:
     - name: SSH on server
       run: |
         ls
-        scp -o StrictHostKeyChecking=no ./project1/cleanup_docker.sh ubuntu@${{ env.SERVER_IP }}:~/.
-        ssh -o StrictHostKeyChecking=no ubuntu@${{ env.SERVER_IP }} 'bash -s' << EOF
+        scp -o StrictHostKeyChecking=no ./project1/cleanup_docker.sh ubuntu@${{ vars.SERVER_IP }}:~/.
+        ssh -o StrictHostKeyChecking=no ubuntu@${{ vars.SERVER_IP }} 'bash -s' << EOF
             chmod +x ./cleanup_docker.sh
           # Run the cleanup script with the passed image name and tag
             ./cleanup_docker.sh ${{ env.IMAGE_NAME }}:$UNIQUE_TAG  > output.txt

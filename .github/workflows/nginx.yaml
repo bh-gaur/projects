@@ -1,4 +1,4 @@
-name: project1
+name: project2
 
 on:
   workflow_dispatch:
@@ -43,7 +43,7 @@ jobs:
         echo "Generated tag: $UNIQUE_TAG"
         echo "UNIQUE_TAG=$UNIQUE_TAG" >> $GITHUB_ENV
 
-        cd project1/
+        cd project2/
         # Build the Docker image with the unique tag
         docker build -t ${{ secrets.DOCKER_USERNAME }}/projects:$UNIQUE_TAG -f Dockerfile .
 

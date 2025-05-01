@@ -2,7 +2,7 @@
 
 # GitHub Actions CI/CD Workflow for Project1
 
-<!-- This repository contains a GitHub Actions workflow that automates building, pushing, and deploying a Docker image for project1 whenever changes are pushed to the main branch or manually triggered.
+This repository contains a GitHub Actions workflow that automates building, pushing, and deploying a Docker image for project1 whenever changes are pushed to the main branch or manually triggered.
 
     Workflow Overview
     Triggers:
@@ -43,4 +43,4 @@
     Stopping/removing old containers (if any).
     Pulling the new Docker image.
     Running a new container from the updated image.
-    (Exact behavior depends on how cleanup_docker.sh is written.) -->
+    (Exact behavior depends on how cleanup_docker.sh is written.)

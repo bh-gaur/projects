@@ -1,5 +1,35 @@
 pipeline {
-    agent any
+    agent {
+        kubernetes {
+            label 'python-docker-agent'
+            defaultContainer 'python'
+            yaml """
+                apiVersion: v1
+                kind: Pod
+                spec:
+                  containers:
+                  - name: python
+                    image: python:3.9-slim
+                    command:
+                    - cat
+                    tty: true
+                  - name: docker
+                    image: docker:24
+                    command:
+                    - cat
+                    tty: true
+                    securityContext:
+                      runAsUser: 0
+                    volumeMounts:
+                      - name: docker-socket
+                        mountPath: /var/run/docker.sock
+                    volumes:
+                    - name: docker-socket
+                        hostPath:
+                        path: /var/run/docker.sock
+            """
+        }
+    }
 
     environment {
         DOCKER_IMAGE = "bhgaur/python-app-image"
@@ -33,6 +63,7 @@ pipeline {
 
         stage('Check Python Code') {
             steps {
+                container('python') {
                 sh """
                 # Check if Python files exist
                 ls -la SAST-TEST/*.py || echo "No Python files found"
@@ -43,11 +74,13 @@ pipeline {
                 # Run basic Python syntax check
                 python -m py_compile SAST-TEST/app.py
                 """
+                }
             }
         }
 
         stage('Code Quality Check') {
             steps {
+                container('python') {
                 sh """
                 # Install code quality tools
                 pip install flake8 pylint
@@ -58,11 +91,13 @@ pipeline {
                 # Run pylint for code quality
                 pylint SAST-TEST/ --score=no || echo "Pylint warnings found"
                 """
+               }
             }
         }
 
         stage('SAST scan using Bandit') {
             steps {
+                container('python') {
                 sh """
                 pip install bandit
                 pip install semgrep
@@ -74,11 +109,13 @@ pipeline {
                 echo "📋 Report size: \$(wc -c < bandit-report.json | cut -d' ' -f1) bytes"
                 """
                 archiveArtifacts artifacts: 'bandit-report.json', allowEmptyArchive: true
+                }
             }
         }
 
         stage('SAST scan using Semgrep') {
             steps {
+                container('python') {
                 sh """
                 # Run Semgrep scan for security issues
                 semgrep --config=auto --json --output=semgrep-report.json SAST-TEST/ || {
@@ -89,6 +126,7 @@ pipeline {
                 echo "📋 Report size: \$(wc -c < semgrep-report.json 2>/dev/null | cut -d' ' -f1) bytes" || echo "0 bytes"
                 """
                 archiveArtifacts artifacts: 'semgrep-report.json', allowEmptyArchive: true
+                }
             }
         }
 

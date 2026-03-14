@@ -1,0 +1,217 @@
+pipeline {
+    agent any
+
+    environment {
+        GITHUB_REPO = "https://${PAT_TOKEN}@github.com/bh-gaur/devops-learning.git"
+        BRANCH = "main"
+        APP_FOLDER = "snake-app"
+        DOCKER_REPO = "bhgaur/python-app-image"
+        DOCKER_CRED = "dockerhub-cred"
+        IMAGE_TAG = "${BUILD_NUMBER}-${GIT_COMMIT.take(7)}"
+        HELM_CHART_PATH = "Charts/basic-python-app"
+        EMAIL_RECIPIENTS = "gaurb8863@gmail.com, rajagaur333@gmail.com"
+    }
+
+    triggers {
+        pollSCM('H/5 * * * *')  // Poll every 5 minutes
+    }
+
+    stages {
+
+        stage('Checkout Code') {
+            steps {
+                git branch: "${BRANCH}",
+                    url: "${GITHUB_REPO}",
+                    credentialsId: 'github-cred'
+            }
+        }
+
+        stage('Check Folder Changes') {
+            steps {
+                script {
+                    def changes = sh(
+                        script: "git diff --name-only HEAD~1 HEAD",
+                        returnStdout: true
+                    ).trim()
+
+                    if (!changes.contains("${APP_FOLDER}/")) {
+                        currentBuild.result = 'NOT_BUILT'
+                        error("No changes in ${APP_FOLDER}")
+                    }
+                }
+            }
+        }
+
+        stage('SAST Scan - Python') {
+            steps {
+                sh """
+                pip install bandit
+                bandit -r ${APP_FOLDER} -f json -o bandit-report.json
+                """
+                archiveArtifacts artifacts: 'bandit-report.json', allowEmptyArchive: true
+            }
+        }
+
+        stage('DAST Scan - OWASP ZAP') {
+            steps {
+                script {
+                    // Start Python app in background for DAST scanning
+                    sh """
+                    cd ${APP_FOLDER}
+                    python app.py &
+                    APP_PID=\$!
+                    sleep 10
+                    
+                    # Run OWASP ZAP DAST scan
+                    docker run -t --rm \\
+                        -v \$(pwd):/zap/wrk/ \\
+                        -w /zap/wrk/ \\
+                        owasp/zap2docker-stable \\
+                        zap-baseline.py -t http://host.docker.internal:5000 -J dast-report.json
+                    
+                    # Kill the app
+                    kill \$APP_PID
+                    """
+                }
+                archiveArtifacts artifacts: '**/dast-report.json', allowEmptyArchive: true
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                sh """
+                docker build -t ${DOCKER_REPO}:${IMAGE_TAG} ${APP_FOLDER}
+                """
+            }
+        }
+
+        stage('Image Vulnerability Scan') {
+            steps {
+                sh """
+                docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \\
+                  -v \$(pwd):/tmp/.cache/ \\
+                  aquasec/trivy:latest image ${DOCKER_REPO}:${IMAGE_TAG} \\
+                  --exit-code 1 --severity HIGH,CRITICAL -f json -o trivy-report.json
+                """
+                archiveArtifacts artifacts: 'trivy-report.json', allowEmptyArchive: true
+            }
+        }
+
+        stage('Push Image to DockerHub') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: "${DOCKER_CRED}",
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
+                    sh """
+                    echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
+                    docker push ${DOCKER_REPO}:${IMAGE_TAG}
+                    """
+                }
+            }
+        }
+
+        stage('Update Helm Chart') {
+            steps {
+                sh """
+                sed -i.bak 's|tag:.*|tag: ${IMAGE_TAG}|' ${HELM_CHART_PATH}/values.yaml
+                git add ${HELM_CHART_PATH}/values.yaml
+                """
+            }
+        }
+
+        stage('Commit Helm Change') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'github-cred',
+                    usernameVariable: 'GIT_USER',
+                    passwordVariable: 'GIT_PASS'
+                )]) {
+                    sh """
+                    git config user.email "jenkins@ci.com"
+                    git config user.name "jenkins"
+
+                    git commit -m "ci: Update image tag to ${IMAGE_TAG}"
+
+                    git push https://${GIT_USER}:${GIT_PASS}@github.com/bh-gaur/devops-learning.git HEAD:${BRANCH}
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            cleanWs()
+        }
+        success {
+            script {
+                emailext (
+                    subject: "✅ SUCCESS: Jenkins Pipeline - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                    body: """
+                    <h2>🚀 Pipeline Completed Successfully!</h2>
+                    <p><strong>Job:</strong> ${env.JOB_NAME}</p>
+                    <p><strong>Build:</strong> #${env.BUILD_NUMBER}</p>
+                    <p><strong>Branch:</strong> ${env.BRANCH}</p>
+                    <p><strong>Commit:</strong> ${env.GIT_COMMIT}</p>
+                    
+                    <h3>📦 Deployment Details:</h3>
+                    <ul>
+                        <li><strong>Image:</strong> ${DOCKER_REPO}:${IMAGE_TAG}</li>
+                        <li><strong>App Folder:</strong> ${APP_FOLDER}</li>
+                        <li><strong>Helm Chart Updated:</strong> ${HELM_CHART_PATH}/values.yaml</li>
+                    </ul>
+                    
+                    <h3>🔍 Security Reports:</h3>
+                    <ul>
+                        <li><strong>SAST:</strong> bandit-report.json</li>
+                        <li><strong>DAST:</strong> dast-report.json</li>
+                        <li><strong>Image Scan:</strong> trivy-report.json</li>
+                    </ul>
+                    
+                    <p><a href="${env.BUILD_URL}">View Build Details</a></p>
+                    """,
+                    to: "${env.EMAIL_RECIPIENTS}"
+                )
+            }
+        }
+        failure {
+            script {
+                emailext (
+                    subject: "❌ FAILURE: Jenkins Pipeline - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                    body: """
+                    <h2>💥 Pipeline Failed!</h2>
+                    <p><strong>Job:</strong> ${env.JOB_NAME}</p>
+                    <p><strong>Build:</strong> #${env.BUILD_NUMBER}</p>
+                    <p><strong>Branch:</strong> ${env.BRANCH}</p>
+                    <p><strong>Commit:</strong> ${env.GIT_COMMIT}</p>
+                    
+                    <h3>� Check Security Reports:</h3>
+                    <ul>
+                        <li><strong>SAST Report:</strong> bandit-report.json</li>
+                        <li><strong>DAST Report:</strong> dast-report.json</li>
+                        <li><strong>Image Scan:</strong> trivy-report.json</li>
+                    </ul>
+                    
+                    <h3>🐛 Debug Information:</h3>
+                    <ul>
+                        <li><strong>Failed Stage:</strong> Check build log for details</li>
+                        <li><strong>Console Output:</strong> <a href="${env.BUILD_URL}console">View Logs</a></li>
+                    </ul>
+                    
+                    <p><strong>Next Steps:</strong></p>
+                    <ol>
+                        <li>Review the build logs for error details</li>
+                        <li>Check security scan reports for vulnerabilities</li>
+                        <li>Fix the issues and push new changes</li>
+                    </ol>
+                    
+                    <p><a href="${env.BUILD_URL}">View Build Details</a></p>
+                    """,
+                    to: "${env.EMAIL_RECIPIENTS}"
+                )
+            }
+        }
+    }
+}

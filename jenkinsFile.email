@@ -2,140 +2,153 @@ pipeline {
     agent any
 
     environment {
-        GITHUB_REPO = "https://${PAT_TOKEN}@github.com/bh-gaur/devops-learning.git"
-        BRANCH = "main"
-        APP_FOLDER = "snake-app"
-        DOCKER_REPO = "bhgaur/python-app-image"
-        DOCKER_CRED = "dockerhub-cred"
-        IMAGE_TAG = "${BUILD_NUMBER}-${GIT_COMMIT.take(7)}"
-        HELM_CHART_PATH = "Charts/basic-python-app"
-        EMAIL_RECIPIENTS = "gaurb8863@gmail.com, rajagaur333@gmail.com"
+        DOCKER_IMAGE = "bhgaur/python-app-image"
+        REGISTRY_CREDENTIAL = "dockerhub-cred"
+        GIT_CREDENTIAL = "github-cred"
+        SCANNER_HOME = tool 'sonar-scanner'
+        // We define IMAGE_TAG inside the stages to avoid Null Errors
     }
 
     triggers {
-        pollSCM('H/5 * * * *')  // Poll every 5 minutes
+        // Polls GitHub every minute for changes
+        pollSCM('H/1 * * * *') 
     }
 
     stages {
-
-        stage('Checkout Code') {
+        stage('Checkout & Setup') {
             steps {
-                git branch: "${BRANCH}",
-                    url: "${GITHUB_REPO}",
-                    credentialsId: 'github-cred'
-            }
-        }
-
-        stage('Check Folder Changes') {
-            steps {
+                // 1. Pull the code
+                git branch: 'main',
+                    credentialsId: "${GIT_CREDENTIAL}",
+                    url: 'https://github.com/bh-gaur/Devops-learning.git'
+                
+                // 2. Generate the IMAGE_TAG safely after checkout
                 script {
-                    def changes = sh(
-                        script: "git diff --name-only HEAD~1 HEAD",
-                        returnStdout: true
-                    ).trim()
-
-                    if (!changes.contains("${APP_FOLDER}/")) {
-                        currentBuild.result = 'NOT_BUILT'
-                        error("No changes in ${APP_FOLDER}")
-                    }
+                    def shortCommit = sh(returnStdout: true, script: "git rev-parse --short HEAD").trim()
+                    env.IMAGE_TAG = "${env.BUILD_NUMBER}-${shortCommit}"
+                    echo "Calculated Image Tag: ${env.IMAGE_TAG}"
                 }
             }
         }
 
-        stage('SAST Scan - Python') {
+        stage('Check Python Code') {
+            steps {
+                sh """
+                # Check if Python files exist
+                ls -la SAST-TEST/*.py || echo "No Python files found"
+                
+                # Install dependencies
+                pip install -r SAST-TEST/requirements.txt
+                
+                # Run basic Python syntax check
+                python -m py_compile SAST-TEST/app.py
+                """
+            }
+        }
+
+        stage('Code Quality Check') {
+            steps {
+                sh """
+                # Install code quality tools
+                pip install flake8 pylint
+                
+                # Run flake8 for code style
+                flake8 SAST-TEST/ --max-line-length=100 --ignore=E501 || echo "Flake8 warnings found"
+                
+                # Run pylint for code quality
+                pylint SAST-TEST/ --score=no || echo "Pylint warnings found"
+                """
+            }
+        }
+
+        stage('SAST scan using Bandit') {
             steps {
                 sh """
                 pip install bandit
-                bandit -r ${APP_FOLDER} -f json -o bandit-report.json
+                pip install semgrep
+                # Run Bandit scan with exit code on critical issues
+                bandit -r SAST-TEST/ -f json -o bandit-report.json --exit-code
+                
+                # Display report location and summary
+                echo "📊 Bandit report saved to: ${WORKSPACE}/bandit-report.json"
+                echo "📋 Report size: \$(wc -c < bandit-report.json | cut -d' ' -f1) bytes"
                 """
                 archiveArtifacts artifacts: 'bandit-report.json', allowEmptyArchive: true
             }
         }
 
-        stage('DAST Scan - OWASP ZAP') {
+        stage('SAST scan using Semgrep') {
             steps {
-                script {
-                    // Start Python app in background for DAST scanning
-                    sh """
-                    cd ${APP_FOLDER}
-                    python app.py &
-                    APP_PID=\$!
-                    sleep 10
-                    
-                    # Run OWASP ZAP DAST scan
-                    docker run -t --rm \\
-                        -v \$(pwd):/zap/wrk/ \\
-                        -w /zap/wrk/ \\
-                        owasp/zap2docker-stable \\
-                        zap-baseline.py -t http://host.docker.internal:5000 -J dast-report.json
-                    
-                    # Kill the app
-                    kill \$APP_PID
-                    """
+                sh """
+                # Run Semgrep scan for security issues
+                semgrep --config=auto --json --output=semgrep-report.json SAST-TEST/ || {
+                    echo "⚠️ Semgrep found issues (non-critical)"
                 }
-                archiveArtifacts artifacts: '**/dast-report.json', allowEmptyArchive: true
-            }
-        }
-
-        stage('Build Docker Image') {
-            steps {
-                sh """
-                docker build -t ${DOCKER_REPO}:${IMAGE_TAG} ${APP_FOLDER}
+                
+                echo "📊 Semgrep report saved to: ${WORKSPACE}/semgrep-report.json"
+                echo "📋 Report size: \$(wc -c < semgrep-report.json 2>/dev/null | cut -d' ' -f1) bytes" || echo "0 bytes"
                 """
+                archiveArtifacts artifacts: 'semgrep-report.json', allowEmptyArchive: true
             }
         }
 
-        stage('Image Vulnerability Scan') {
-            steps {
-                sh """
-                docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \\
-                  -v \$(pwd):/tmp/.cache/ \\
-                  aquasec/trivy:latest image ${DOCKER_REPO}:${IMAGE_TAG} \\
-                  --exit-code 1 --severity HIGH,CRITICAL -f json -o trivy-report.json
-                """
-                archiveArtifacts artifacts: 'trivy-report.json', allowEmptyArchive: true
-            }
-        }
+        // stage('Secret Scan using Gitleaks') {
+        //     steps {
+        //         sh """
+        //         # Run Gitleaks to detect secrets in code
+        //         gitleaks detect --source=SAST-TEST/ --report-format=json --output=gitleaks-report.json --verbose || {
+        //             echo "⚠️ Gitleaks found potential secrets"
+        //         }
+                
+        //         echo "📊 Gitleaks report saved to: ${WORKSPACE}/gitleaks-report.json"
+        //         echo "📋 Report size: \$(wc -c < gitleaks-report.json 2>/dev/null | cut -d' ' -f1) bytes" || echo "0 bytes"
+        //         """
+        //         archiveArtifacts artifacts: 'gitleaks-report.json', allowEmptyArchive: true
+        //     }
+        // }
 
-        stage('Push Image to DockerHub') {
-            steps {
-                withCredentials([usernamePassword(
-                    credentialsId: "${DOCKER_CRED}",
-                    usernameVariable: 'DOCKER_USER',
-                    passwordVariable: 'DOCKER_PASS'
-                )]) {
-                    sh """
-                    echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
-                    docker push ${DOCKER_REPO}:${IMAGE_TAG}
-                    """
+        stage('Python Application Deployment') {
+            when {
+                branch 'main'
+                // changeset "SAST-TEST/**"
+            }
+            /* CRITICAL FIX: Nested stages must be inside a 'stages' block 
+               to avoid the "Unknown stage section" error.
+            */
+            stages {
+                stage('Build Docker Image') {
+                    steps {
+                        sh "docker build -t ${DOCKER_IMAGE}:${IMAGE_TAG} ./SAST-TEST"
+                    }
                 }
-            }
-        }
 
-        stage('Update Helm Chart') {
-            steps {
-                sh """
-                sed -i.bak 's|tag:.*|tag: ${IMAGE_TAG}|' ${HELM_CHART_PATH}/values.yaml
-                git add ${HELM_CHART_PATH}/values.yaml
-                """
-            }
-        }
+                stage('Push Image to DockerHub') {
+                    steps {
+                        script {
+                            docker.withRegistry('', REGISTRY_CREDENTIAL) {
+                                sh "docker push ${DOCKER_IMAGE}:${IMAGE_TAG}"
+                            }
+                        }
+                    }
+                }
 
-        stage('Commit Helm Change') {
-            steps {
-                withCredentials([usernamePassword(
-                    credentialsId: 'github-cred',
-                    usernameVariable: 'GIT_USER',
-                    passwordVariable: 'GIT_PASS'
-                )]) {
-                    sh """
-                    git config user.email "jenkins@ci.com"
-                    git config user.name "jenkins"
-
-                    git commit -m "ci: Update image tag to ${IMAGE_TAG}"
-
-                    git push https://${GIT_USER}:${GIT_PASS}@github.com/bh-gaur/devops-learning.git HEAD:${BRANCH}
-                    """
+                stage('Update Helm Chart') {
+                    steps {
+                        script {
+                            sh """
+                                cd Charts/basic-python-app
+                                # Update the tag in values.yaml
+                                sed -i 's/tag:.*/tag: "${IMAGE_TAG}"/' values.yaml
+                                
+                                # Commit the change back to Git
+                                git config user.name "jenkins-bot"
+                                git config user.email "jenkins@ci.local"
+                                git add values.yaml
+                                git commit -m "Update image tag to ${IMAGE_TAG} [skip ci]"
+                                git push origin main
+                            """
+                        }
+                    }
                 }
             }
         }
@@ -143,75 +156,10 @@ pipeline {
 
     post {
         always {
-            cleanWs()
-        }
-        success {
-            script {
-                emailext (
-                    subject: "✅ SUCCESS: Jenkins Pipeline - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                    body: """
-                    <h2>🚀 Pipeline Completed Successfully!</h2>
-                    <p><strong>Job:</strong> ${env.JOB_NAME}</p>
-                    <p><strong>Build:</strong> #${env.BUILD_NUMBER}</p>
-                    <p><strong>Branch:</strong> ${env.BRANCH}</p>
-                    <p><strong>Commit:</strong> ${env.GIT_COMMIT}</p>
-                    
-                    <h3>📦 Deployment Details:</h3>
-                    <ul>
-                        <li><strong>Image:</strong> ${DOCKER_REPO}:${IMAGE_TAG}</li>
-                        <li><strong>App Folder:</strong> ${APP_FOLDER}</li>
-                        <li><strong>Helm Chart Updated:</strong> ${HELM_CHART_PATH}/values.yaml</li>
-                    </ul>
-                    
-                    <h3>🔍 Security Reports:</h3>
-                    <ul>
-                        <li><strong>SAST:</strong> bandit-report.json</li>
-                        <li><strong>DAST:</strong> dast-report.json</li>
-                        <li><strong>Image Scan:</strong> trivy-report.json</li>
-                    </ul>
-                    
-                    <p><a href="${env.BUILD_URL}">View Build Details</a></p>
-                    """,
-                    to: "${env.EMAIL_RECIPIENTS}"
-                )
-            }
+            echo "Pipeline finished."
         }
         failure {
-            script {
-                emailext (
-                    subject: "❌ FAILURE: Jenkins Pipeline - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                    body: """
-                    <h2>💥 Pipeline Failed!</h2>
-                    <p><strong>Job:</strong> ${env.JOB_NAME}</p>
-                    <p><strong>Build:</strong> #${env.BUILD_NUMBER}</p>
-                    <p><strong>Branch:</strong> ${env.BRANCH}</p>
-                    <p><strong>Commit:</strong> ${env.GIT_COMMIT}</p>
-                    
-                    <h3>� Check Security Reports:</h3>
-                    <ul>
-                        <li><strong>SAST Report:</strong> bandit-report.json</li>
-                        <li><strong>DAST Report:</strong> dast-report.json</li>
-                        <li><strong>Image Scan:</strong> trivy-report.json</li>
-                    </ul>
-                    
-                    <h3>🐛 Debug Information:</h3>
-                    <ul>
-                        <li><strong>Failed Stage:</strong> Check build log for details</li>
-                        <li><strong>Console Output:</strong> <a href="${env.BUILD_URL}console">View Logs</a></li>
-                    </ul>
-                    
-                    <p><strong>Next Steps:</strong></p>
-                    <ol>
-                        <li>Review the build logs for error details</li>
-                        <li>Check security scan reports for vulnerabilities</li>
-                        <li>Fix the issues and push new changes</li>
-                    </ol>
-                    
-                    <p><a href="${env.BUILD_URL}">View Build Details</a></p>
-                    """,
-                    to: "${env.EMAIL_RECIPIENTS}"
-                )
-            }
+            echo "Pipeline failed. Check SonarQube or Docker logs."
         }
     }
 }

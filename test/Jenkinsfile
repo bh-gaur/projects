@@ -1,0 +1,159 @@
+pipeline {
+    agent any
+
+    environment {
+        DOCKER_REPO = "bhgaur/python-test-app"
+        DOCKER_CRED = "dockerhub-cred"
+        IMAGE_TAG = "${BUILD_NUMBER}-${GIT_COMMIT.take(7)}"
+    }
+
+    triggers {
+        pollSCM('H/5 * * * *')  // Poll every 5 minutes
+    }
+
+    stages {
+
+        stage('Checkout Code') {
+            steps {
+                git url: 'https://github.com/bh-gaur/devops-learning.git', branch: 'main'
+            }
+        }
+
+        stage('Check Python Code') {
+            steps {
+                sh """
+                # Check if Python files exist
+                ls -la *.py || echo "No Python files found"
+                
+                # Install dependencies
+                pip install -r requirements.txt
+                
+                # Run basic Python syntax check
+                python -m py_compile app.py
+                """
+            }
+        }
+
+        stage('Run Tests') {
+            steps {
+                sh """
+                # Install test dependencies
+                pip install pytest pytest-flask
+                
+                # Create simple test file
+                cat > test_app.py << 'EOF'
+import pytest
+import app
+import json
+
+def test_home_endpoint():
+    client = app.app.test_client()
+    response = client.get('/')
+    assert response.status_code == 200
+    data = json.loads(response.data)
+    assert data['status'] == 'healthy'
+
+def test_health_endpoint():
+    client = app.app.test_client()
+    response = client.get('/health')
+    assert response.status_code == 200
+    data = json.loads(response.data)
+    assert data['status'] == 'healthy'
+
+def test_info_endpoint():
+    client = app.app.test_client()
+    response = client.get('/api/info')
+    assert response.status_code == 200
+    data = json.loads(response.data)
+    assert 'app_name' in data
+                EOF
+                
+                # Run tests
+                python -m pytest test_app.py -v --junitxml=test-results.xml
+                """
+            }
+            post {
+                always {
+                    junit 'test-results.xml'
+                }
+            }
+        }
+
+        stage('Code Quality Check') {
+            steps {
+                sh """
+                # Install code quality tools
+                pip install flake8 pylint
+                
+                # Run flake8 for code style
+                flake8 app.py --max-line-length=100 --ignore=E501 || echo "Flake8 warnings found"
+                
+                # Run pylint for code quality
+                pylint app.py --score=no || echo "Pylint warnings found"
+                """
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                sh """
+                docker build -t ${DOCKER_REPO}:${IMAGE_TAG} .
+                docker tag ${DOCKER_REPO}:${IMAGE_TAG} ${DOCKER_REPO}:latest
+                """
+            }
+        }
+
+        stage('Test Docker Image') {
+            steps {
+                sh """
+                # Run container in background
+                docker run -d --name test-container -p 5001:5000 ${DOCKER_REPO}:${IMAGE_TAG}
+                
+                # Wait for container to start
+                sleep 5
+                
+                # Test health endpoint
+                curl -f http://localhost:5001/health || exit 1
+                
+                # Test home endpoint
+                curl -f http://localhost:5000/ || exit 1
+                
+                # Clean up
+                docker stop test-container
+                docker rm test-container
+                """
+            }
+        }
+
+        stage('Push Image to DockerHub') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: "${DOCKER_CRED}",
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
+                    sh """
+                    echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
+                    docker push ${DOCKER_REPO}:${IMAGE_TAG}
+                    docker push ${DOCKER_REPO}:latest
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            cleanWs()
+        }
+        success {
+            echo "✅ Test pipeline completed successfully!"
+            echo "📦 Image pushed: ${DOCKER_REPO}:${IMAGE_TAG}"
+            echo "🏷️  Latest tag: ${DOCKER_REPO}:latest"
+        }
+        failure {
+            echo "❌ Test pipeline failed!"
+            echo "🐛 Check the build logs for details"
+        }
+    }
+}

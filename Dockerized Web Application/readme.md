@@ -12,15 +12,14 @@ A simple web application configured to run in Docker containers.
 
 ### Prerequisites
 
-- Docker
+- Docker, Docker-compose
 
 ### Run the application
 
 1. Build and start the containers:
 
    ```bash
-   docker build -t web-app:1 .
-   docker run -it -p 8000:8000 web-app:1
+   docker-compose up --build # -d for background
    ```
 
 2. Open the application in your browser at:
@@ -32,13 +31,13 @@ A simple web application configured to run in Docker containers.
 ### Stop the application
 
 ```bash
-docker stop < cont id >
+docker-compose down
 ```
 
 ## Project Structure
 
 - `Dockerfile` - defines the application container image
-- `app/ or main.py` - application source code
+- `app/` - have application source code
 
 ## Notes
 

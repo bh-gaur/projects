@@ -3,6 +3,7 @@
 # GitHub Actions CI/CD Workflow for Project1
 
 This repository contains a GitHub Actions workflow that automates building, pushing, and deploying a Docker image for project1 whenever changes are pushed to the main branch or manually triggered.
+This repository contains a GitHub Actions workflow that automates building, pushing, and deploying a Docker image for project1 whenever changes are pushed to the main branch or manually triggered.
 
     Workflow Overview
     Triggers:
